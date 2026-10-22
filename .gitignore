@@ -1,0 +1,22 @@
+# Build output, local verification, and distribution packages
+**/bin/
+**/obj/
+artifacts/
+dist/
+*.dll
+*.exe
+*.pdb
+*.mdb
+*.log
+*.dmp
+*.zip
+
+# Machine-specific settings and local agent memory
+Directory.Build.local.props
+docs/agent-memory.md
+.env
+.env.*
+*.user
+*.suo
+.vs/
+.vscode/

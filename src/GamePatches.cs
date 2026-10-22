@@ -55,5 +55,10 @@ internal static class GamePatches
         "Could not process the pause key while confirming application exit", () => !Runtime.Confirmation.ConsumePauseToggle(), false);
 
     private static void BeforeCurrentWindow(object __0) => Callbacks.Boundary.Run(
-        "Could not dismiss the quit confirmation during navigation", () => Runtime.Confirmation.CloseIfLeaving(__0));
+        "Could not prepare Quit to Desktop during navigation", () =>
+        {
+            Runtime.Confirmation.CloseIfLeaving(__0);
+            if (__0 is PauseMenuView menu)
+                MenuAccent.Apply(menu, Runtime.Entry.GetOrCreate(LanguageResourceHandler.Instance));
+        });
 }

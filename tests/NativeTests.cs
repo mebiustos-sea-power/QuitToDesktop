@@ -82,6 +82,65 @@ internal static class NativeTests
                 Require(button.ButtonContent == Localization.For(code).Title && !button.ButtonContent.Contains("MISSING TEXT"), "The native button label did not follow the replacement language dictionary.");
             }
         });
+        Check("only the added quit entry receives the dialog accent and extra spacing, including translated and recycled menu rows", () =>
+        {
+            bool Same(Color first, Color second) => first.A == second.A && first.R == second.R && first.G == second.G && first.B == second.B;
+            ChangeLanguage("en", false);
+            var entry = new MenuEntry(() => { }, _ => { });
+            var quit = entry.GetOrCreate(language);
+            var native = new PauseMenuButton("PauseMenu", "Exit", new DelegateCommand(_ => { }), true, true);
+            var sameLabel = new PauseMenuButton("MebiusTosQuitToDesktop", "Quit", new DelegateCommand(_ => { }), true, true);
+            var menu = new PauseMenuView();
+            var original = (Style)GUI.ParseXaml("<Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' TargetType='Button'><Setter Property='Background' Value='#3F4A4F'/><Setter Property='Foreground' Value='#D8D8D8'/><Setter Property='Template'><Setter.Value><ControlTemplate TargetType='Button'><Border Background='{TemplateBinding Background}'><ContentPresenter/></Border></ControlTemplate></Setter.Value></Setter></Style>");
+            menu.Resources[nameof(Button)] = original;
+            var rows = new ItemsControl
+            {
+                ItemsSource = new[] { native, sameLabel, quit },
+                ItemTemplate = (DataTemplate)GUI.ParseXaml("<DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'><Button Content='{Binding ButtonContent}' Height='40' Margin='0,0,0,15'/></DataTemplate>")
+            };
+            menu.Content = new MenuPage
+            {
+                ShortLeftPane = new ScrollViewer { Content = rows },
+                Template = (ControlTemplate)GUI.ParseXaml("<ControlTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' xmlns:local='clr-namespace:SeapowerUI;assembly=Seapower-Scripts' TargetType='{x:Type local:MenuPage}'><ContentPresenter Content='{TemplateBinding ShortLeftPane}'/></ControlTemplate>")
+            };
+            Button RowButton(int index) => (Button)VisualTreeHelper.GetChild(rows.ItemContainerGenerator.ContainerFromIndex(index), 0);
+            Rect Bounds(Button button) => button.TransformToAncestor(rows).TransformBounds(new Rect(0, 0, button.ActualWidth, button.ActualHeight));
+            float Gap(Button upper, Button lower) { var above = Bounds(upper); return Bounds(lower).Y - above.Y - above.Height; }
+            MenuAccent.Apply(menu, quit);
+            var applied = menu.Resources[nameof(Button)];
+            MenuAccent.Apply(menu, quit);
+            var view = GUI.CreateView(menu);
+            try
+            {
+                view.SetSize(640, 480); view.Update(0);
+                var nativeButton = RowButton(0); var otherButton = RowButton(1); var quitButton = RowButton(2);
+                float ordinaryGap = Gap(nativeButton, otherButton), quitGap = Gap(otherButton, quitButton);
+                Require(ordinaryGap > 0 && quitGap > ordinaryGap && quitGap <= ordinaryGap * 2 &&
+                    Bounds(nativeButton).X == Bounds(quitButton).X && nativeButton.ActualWidth == quitButton.ActualWidth && nativeButton.ActualHeight == quitButton.ActualHeight,
+                    "The added entry needs a modest extra gap above it without changing the button's size or alignment.");
+                using var dialog = new UiFixture(); dialog.Open();
+                Color background = ((SolidColorBrush)dialog.Button("ConfirmQuit").Background).Color;
+                Color foreground = ((SolidColorBrush)dialog.Button("ConfirmQuit").Foreground).Color;
+                Require(Same(((SolidColorBrush)quitButton.Background).Color, background) && Same(((SolidColorBrush)quitButton.Foreground).Color, foreground),
+                    "The added entry does not match the confirmation action's colors: " + quitButton.Background + "/" + quitButton.Foreground + " expected " + background + "/" + foreground);
+                Require(Same(((SolidColorBrush)nativeButton.Background).Color, Color.FromRgb(0x3F, 0x4A, 0x4F)) &&
+                    Same(((SolidColorBrush)otherButton.Background).Color, ((SolidColorBrush)nativeButton.Background).Color),
+                    "The accent changed a native entry or an unrelated action with the same label.");
+                Require(ReferenceEquals(menu.Resources[nameof(Button)], applied) && ((Style)applied).BasedOn.Equals(original) &&
+                    ReferenceEquals(quitButton.Template, nativeButton.Template), "Styling was stacked or the existing button template was replaced.");
+                ChangeLanguage("ja", true); view.Update(0.1);
+                Require(Same(((SolidColorBrush)quitButton.Background).Color, background) && Gap(otherButton, quitButton) == quitGap,
+                    "A language change removed the accent or spacing.");
+                var quitRow = (ContentPresenter)rows.ItemContainerGenerator.ContainerFromIndex(2);
+                quitRow.DataContext = native; view.Update(0.2);
+                Require(Same(((SolidColorBrush)quitButton.Background).Color, ((SolidColorBrush)nativeButton.Background).Color) && Gap(otherButton, quitButton) == ordinaryGap,
+                    "A recycled native row retained the quit accent or spacing.");
+                quitRow.DataContext = quit; view.Update(0.3);
+                Require(Same(((SolidColorBrush)quitButton.Background).Color, background) && Gap(otherButton, quitButton) == quitGap,
+                    "A rebuilt quit row lost its accent or spacing.");
+            }
+            finally { view.Dispose(); }
+        });
         string campaign = Path.GetFullPath(Path.Combine(directory, "..", "..", "workshop", "content", "1286220", "3813157776", "DynamicCampaignMod.dll"));
         if (!File.Exists(campaign)) { Console.WriteLine("SKIP optional installed campaign filter: Dynamic Campaign Mod is not installed."); return; }
         Check("the installed campaign's actual battle-menu filter retains the new quit action", () =>

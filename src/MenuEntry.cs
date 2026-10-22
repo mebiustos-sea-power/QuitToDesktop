@@ -17,7 +17,10 @@ internal sealed class MenuEntry
     internal MenuEntry(Action show, Action<QuitText> refreshDialog)
     { this.show = show; this.refreshDialog = refreshDialog; }
 
-    internal List<PauseMenuButton> Extend(List<PauseMenuButton> original, LanguageResourceHandler language)
+    internal List<PauseMenuButton> Extend(List<PauseMenuButton> original, LanguageResourceHandler language) =>
+        MenuList.AppendOnce(original, GetOrCreate(language));
+
+    internal PauseMenuButton GetOrCreate(LanguageResourceHandler language)
     {
         if (ReferenceEquals(owner, null))
         {
@@ -28,7 +31,7 @@ internal sealed class MenuEntry
         if (!ReferenceEquals(owner, language)) throw new InvalidOperationException("The language handler was replaced.");
         Publish();
         entry ??= new PauseMenuButton(Section, Key, new DelegateCommand(_ => Callbacks.Boundary.Run("Could not open the quit confirmation", show)), true, true);
-        return MenuList.AppendOnce(original, entry);
+        return entry;
     }
 
     private void Publish()

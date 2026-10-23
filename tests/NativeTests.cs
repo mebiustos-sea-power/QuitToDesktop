@@ -82,30 +82,45 @@ internal static class NativeTests
                 Require(button.ButtonContent == Localization.For(code).Title && !button.ButtonContent.Contains("MISSING TEXT"), "The native button label did not follow the replacement language dictionary.");
             }
         });
-        Check("only the added quit entry receives the dialog accent and extra spacing, including translated and recycled menu rows", () =>
+        Check("only the quit entry is compact and right-aligned, while neighboring mod actions and scrolling remain usable", () =>
         {
             bool Same(Color first, Color second) => first.A == second.A && first.R == second.R && first.G == second.G && first.B == second.B;
             ChangeLanguage("en", false);
-            var entry = new MenuEntry(() => { }, _ => { });
+            int opens = 0, nativeClicks = 0, beforeClicks = 0, afterClicks = 0;
+            var entry = new MenuEntry(() => opens++, _ => { });
             var quit = entry.GetOrCreate(language);
-            var native = new PauseMenuButton("PauseMenu", "Exit", new DelegateCommand(_ => { }), true, true);
-            var sameLabel = new PauseMenuButton("MebiusTosQuitToDesktop", "Quit", new DelegateCommand(_ => { }), true, true);
-            var menu = new PauseMenuView();
-            var original = (Style)GUI.ParseXaml("<Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' TargetType='Button'><Setter Property='Background' Value='#3F4A4F'/><Setter Property='Foreground' Value='#D8D8D8'/><Setter Property='Template'><Setter.Value><ControlTemplate TargetType='Button'><Border Background='{TemplateBinding Background}'><ContentPresenter/></Border></ControlTemplate></Setter.Value></Setter></Style>");
+            var native = new PauseMenuButton("PauseMenu", "Exit", new DelegateCommand(_ => nativeClicks++), true, true);
+            var sameLabel = new PauseMenuButton("MebiusTosQuitToDesktop", "Quit", new DelegateCommand(_ => beforeClicks++), true, true);
+            var following = new PauseMenuButton("PauseMenu", "SaveAs", new DelegateCommand(_ => afterClicks++), true, true);
+            var menu = new PauseMenuView { HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
+            var original = (Style)GUI.ParseXaml("<Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' TargetType='Button'><Setter Property='Background' Value='#3F4A4F'/><Setter Property='Foreground' Value='#D8D8D8'/><Setter Property='Padding' Value='8,7'/><Setter Property='Template'><Setter.Value><ControlTemplate TargetType='Button'><Border Background='{TemplateBinding Background}'><ContentPresenter Margin='{TemplateBinding Padding}'/></Border></ControlTemplate></Setter.Value></Setter></Style>");
             menu.Resources[nameof(Button)] = original;
             var rows = new ItemsControl
             {
-                ItemsSource = new[] { native, sameLabel, quit },
-                ItemTemplate = (DataTemplate)GUI.ParseXaml("<DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'><Button Content='{Binding ButtonContent}' Height='40' Margin='0,0,0,15'/></DataTemplate>")
+                ItemsSource = new[] { native, sameLabel, quit, following },
+                ItemTemplate = (DataTemplate)GUI.ParseXaml("<DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'><Button Content='{Binding ButtonContent}' Command='{Binding ButtonCommand}' Height='40' Margin='0,0,0,15'/></DataTemplate>")
+            };
+            // The standalone fixture does not load the game's theme; provide its scrolling viewport explicitly.
+            var scroll = new ScrollViewer
+            {
+                Content = rows, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                Template = (ControlTemplate)GUI.ParseXaml("<ControlTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' TargetType='ScrollViewer'><ScrollContentPresenter x:Name='PART_ScrollContentPresenter' Content='{TemplateBinding Content}'/></ControlTemplate>")
             };
             menu.Content = new MenuPage
             {
-                ShortLeftPane = new ScrollViewer { Content = rows },
+                ShortLeftPane = scroll,
                 Template = (ControlTemplate)GUI.ParseXaml("<ControlTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' xmlns:local='clr-namespace:SeapowerUI;assembly=Seapower-Scripts' TargetType='{x:Type local:MenuPage}'><ContentPresenter Content='{TemplateBinding ShortLeftPane}'/></ControlTemplate>")
             };
             Button RowButton(int index) => (Button)VisualTreeHelper.GetChild(rows.ItemContainerGenerator.ContainerFromIndex(index), 0);
             Rect Bounds(Button button) => button.TransformToAncestor(rows).TransformBounds(new Rect(0, 0, button.ActualWidth, button.ActualHeight));
             float Gap(Button upper, Button lower) { var above = Bounds(upper); return Bounds(lower).Y - above.Y - above.Height; }
+            void RequireCompact(Button full, Button compact)
+            {
+                var baseline = Bounds(full); var actual = Bounds(compact);
+                Require(actual.Width > 0 && actual.X > baseline.X + baseline.Width / 2 &&
+                    Math.Abs(actual.X + actual.Width - baseline.X - baseline.Width) < 0.1f && actual.Height == baseline.Height,
+                    $"Quit must fit its label on the right, clear of the original button's center, while retaining its height. Full={baseline.X},{baseline.Y},{baseline.Width},{baseline.Height}; quit={actual.X},{actual.Y},{actual.Width},{actual.Height}; alignment={compact.HorizontalAlignment}; menu={menu.ActualWidth}; page={((MenuPage)menu.Content).ActualWidth}; scroll={scroll.ActualWidth}/{scroll.ViewportWidth}; items={rows.ActualWidth}.");
+            }
             MenuAccent.Apply(menu, quit);
             var applied = menu.Resources[nameof(Button)];
             MenuAccent.Apply(menu, quit);
@@ -113,31 +128,58 @@ internal static class NativeTests
             try
             {
                 view.SetSize(640, 480); view.Update(0);
-                var nativeButton = RowButton(0); var otherButton = RowButton(1); var quitButton = RowButton(2);
+                var nativeButton = RowButton(0); var otherButton = RowButton(1); var quitButton = RowButton(2); var followingButton = RowButton(3);
                 float ordinaryGap = Gap(nativeButton, otherButton), quitGap = Gap(otherButton, quitButton);
-                Require(ordinaryGap > 0 && quitGap > ordinaryGap && quitGap <= ordinaryGap * 2 &&
-                    Bounds(nativeButton).X == Bounds(quitButton).X && nativeButton.ActualWidth == quitButton.ActualWidth && nativeButton.ActualHeight == quitButton.ActualHeight,
-                    "The added entry needs a modest extra gap above it without changing the button's size or alignment.");
+                RequireCompact(nativeButton, quitButton);
+                Require(ordinaryGap > 0 && quitGap > ordinaryGap * 2 && Gap(quitButton, followingButton) == ordinaryGap &&
+                    Bounds(otherButton).X == Bounds(nativeButton).X && otherButton.ActualWidth == nativeButton.ActualWidth &&
+                    Bounds(followingButton).X == Bounds(nativeButton).X && followingButton.ActualWidth == nativeButton.ActualWidth,
+                    "The extra separation must belong only to Quit; actions before and after it must retain their full width and normal spacing.");
+                void ClickAt(float x, float y)
+                {
+                    view.MouseMove((int)x, (int)y); view.MouseButtonDown((int)x, (int)y, MouseButton.Left); view.MouseButtonUp((int)x, (int)y, MouseButton.Left);
+                }
+                void Click(Button button)
+                {
+                    var bounds = button.TransformToAncestor(menu).TransformBounds(new Rect(0, 0, button.ActualWidth, button.ActualHeight));
+                    ClickAt(bounds.X + bounds.Width / 2, bounds.Y + bounds.Height / 2);
+                }
+                var normalBounds = Bounds(nativeButton); var quitBounds = Bounds(quitButton);
+                ClickAt(normalBounds.X + normalBounds.Width / 2, quitBounds.Y + quitBounds.Height / 2);
+                Require(opens == 0, "A downward miss from the full-width action's center clicked Quit.");
+                Click(nativeButton); Click(otherButton); Click(followingButton); Click(quitButton);
+                Require(nativeClicks == 1 && beforeClicks == 1 && afterClicks == 1 && opens == 1,
+                    "Changing the quit layout broke a neighboring action or the quit command's actual hit area.");
                 using var dialog = new UiFixture(); dialog.Open();
                 Color background = ((SolidColorBrush)dialog.Button("ConfirmQuit").Background).Color;
                 Color foreground = ((SolidColorBrush)dialog.Button("ConfirmQuit").Foreground).Color;
                 Require(Same(((SolidColorBrush)quitButton.Background).Color, background) && Same(((SolidColorBrush)quitButton.Foreground).Color, foreground),
                     "The added entry does not match the confirmation action's colors: " + quitButton.Background + "/" + quitButton.Foreground + " expected " + background + "/" + foreground);
                 Require(Same(((SolidColorBrush)nativeButton.Background).Color, Color.FromRgb(0x3F, 0x4A, 0x4F)) &&
-                    Same(((SolidColorBrush)otherButton.Background).Color, ((SolidColorBrush)nativeButton.Background).Color),
+                    Same(((SolidColorBrush)otherButton.Background).Color, ((SolidColorBrush)nativeButton.Background).Color) &&
+                    Same(((SolidColorBrush)followingButton.Background).Color, ((SolidColorBrush)nativeButton.Background).Color),
                     "The accent changed a native entry or an unrelated action with the same label.");
                 Require(ReferenceEquals(menu.Resources[nameof(Button)], applied) && ((Style)applied).BasedOn.Equals(original) &&
                     ReferenceEquals(quitButton.Template, nativeButton.Template), "Styling was stacked or the existing button template was replaced.");
                 ChangeLanguage("ja", true); view.Update(0.1);
+                RequireCompact(nativeButton, quitButton);
                 Require(Same(((SolidColorBrush)quitButton.Background).Color, background) && Gap(otherButton, quitButton) == quitGap,
                     "A language change removed the accent or spacing.");
                 var quitRow = (ContentPresenter)rows.ItemContainerGenerator.ContainerFromIndex(2);
                 quitRow.DataContext = native; view.Update(0.2);
-                Require(Same(((SolidColorBrush)quitButton.Background).Color, ((SolidColorBrush)nativeButton.Background).Color) && Gap(otherButton, quitButton) == ordinaryGap,
-                    "A recycled native row retained the quit accent or spacing.");
+                Require(Same(((SolidColorBrush)quitButton.Background).Color, ((SolidColorBrush)nativeButton.Background).Color) &&
+                    Gap(otherButton, quitButton) == ordinaryGap && quitButton.ActualWidth == nativeButton.ActualWidth && Bounds(quitButton).X == Bounds(nativeButton).X,
+                    "A recycled native row retained the quit appearance or spacing.");
                 quitRow.DataContext = quit; view.Update(0.3);
+                RequireCompact(nativeButton, quitButton);
                 Require(Same(((SolidColorBrush)quitButton.Background).Color, background) && Gap(otherButton, quitButton) == quitGap,
                     "A rebuilt quit row lost its accent or spacing.");
+                view.SetSize(360, 180); view.Update(0.4);
+                RequireCompact(nativeButton, quitButton);
+                Require(scroll.ScrollableHeight > 0, "The fixture did not exercise an overflowing menu.");
+                scroll.ScrollToBottom(); view.Update(0.5);
+                Require(scroll.VerticalOffset > 0 && Gap(quitButton, followingButton) == ordinaryGap,
+                    "The menu stopped scrolling or a following action was displaced.");
             }
             finally { view.Dispose(); }
         });

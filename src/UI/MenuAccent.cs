@@ -17,17 +17,18 @@ internal static class MenuAccent
         var original = menu.TryFindResource(nameof(Button)) as Style
             ?? throw new InvalidOperationException("The pause menu's button style is unavailable.");
         var style = new Style { TargetType = typeof(Button), BasedOn = original };
-        // Match the shared entry itself, so translated labels and unrelated buttons cannot select the accent.
+        // Match the shared entry itself, so translated labels and unrelated buttons cannot select these settings.
         var trigger = new DataTrigger { Binding = new Binding("."), Value = quit };
         trigger.Setters.Add(new Setter { Property = Control.BackgroundProperty,
             Value = new SolidColorBrush(Color.FromRgb(0x77, 0x3F, 0x37)) });
         trigger.Setters.Add(new Setter { Property = Control.ForegroundProperty,
             Value = new SolidColorBrush(Color.FromRgb(0xF1, 0xF4, 0xF5)) });
+        trigger.Setters.Add(new Setter { Property = FrameworkElement.HorizontalAlignmentProperty, Value = HorizontalAlignment.Right });
         style.Triggers.Add(trigger);
         // The native button has a local Margin; space its item container instead.
         var rowStyle = new Style { TargetType = typeof(ContentPresenter), BasedOn = items.ItemContainerStyle };
         var spacing = new DataTrigger { Binding = new Binding("."), Value = quit };
-        spacing.Setters.Add(new Setter { Property = FrameworkElement.MarginProperty, Value = new Thickness(0, 8, 0, 0) });
+        spacing.Setters.Add(new Setter { Property = FrameworkElement.MarginProperty, Value = new Thickness(0, 24, 0, 0) });
         rowStyle.Triggers.Add(spacing);
         items.ItemContainerStyle = rowStyle;
         menu.Resources[ResourceKey] = style;

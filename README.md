@@ -31,7 +31,7 @@ Use a Windows .NET SDK with the .NET 10 and .NET Standard 2.1 targeting packs. C
 & .\build.ps1 -Test
 ```
 
-The package is written to `dist/QuitToDesktop` and `dist/QuitToDesktop-v0.1.2.zip`. The three package files are the plugin DLL, this README, and `_info.ini`; the bilingual UI and XAML are embedded in the DLL.
+The package is written to `dist/QuitToDesktop` and `dist/QuitToDesktop-v0.1.3.zip`. The three package files are the plugin DLL, this README, and `_info.ini`; the bilingual UI and XAML are embedded in the DLL.
 
 Core tests cover mandatory confirmation, cancellation, stale/duplicate approval, menu replacement and ordering, mod-manager activation, language selection, deferred startup, and managed-error logging. Separate tests use the game's actual Mono runtime and native Noesis library without starting or attaching to Sea Power. Before native Noesis initialization, they verify that only the startup observer is installed. They then verify that an initialization failure is logged without installing UI hooks, and that nested initialization waits for the outer return and a later update before installing the real hooks. They also exercise the packaged dialog, native keyboard and mouse routing, language changes, lifecycle cleanup, actual Harmony hooks and the installed campaign's menu filter. Application exit is replaced by a counter in the dialog fixture. A local ignored copy of the game assembly bypasses global game-data loading and the pause-view Unity scene guard; all six product hook methods retain their original IL. The installed game assembly is read-only and is never changed.
 

@@ -16,8 +16,8 @@ The menu entry and every confirmation label follow the game's language setting. 
 
 ## Requirements and installation
 
-- Sea Power 0.8.7 (the version used for initial verification).
-- BepInEx and Anchor Chain, already required by Anchor Chain code mods.
+- Sea Power (current isolated checks use 0.9.3).
+- Anchor Chain.
 
 When ready to install, close Sea Power, copy the packaged `QuitToDesktop` folder to `Sea Power_Data/StreamingAssets`, enable **Quit to Desktop** and **Anchor Chain** in the mod manager, and restart the game. To disable it, uncheck it and restart. The build script only creates a local package; it never installs it.
 
@@ -31,7 +31,7 @@ Use a Windows .NET SDK with the .NET 10 and .NET Standard 2.1 targeting packs. C
 & .\build.ps1 -Test
 ```
 
-The package is written to `dist/QuitToDesktop` and `dist/QuitToDesktop-v0.1.3.zip`. The package contains the plugin DLL, this README, `_info.ini`, and the two language folders. The dialog XAML is embedded in the DLL; translated text is stored in the INI files. To build into a separate directory, pass `-OutputDirectory <path>`.
+The package is written to `dist/QuitToDesktop` and `dist/QuitToDesktop-v0.1.4.zip`. The package contains the plugin DLL, this README, `_info.ini`, and the two language folders. The dialog XAML is embedded in the DLL; translated text is stored in the INI files. To build into a separate directory, pass `-OutputDirectory <path>`.
 
 Core tests cover mandatory confirmation, cancellation, stale/duplicate approval, menu replacement and ordering, mod-manager activation, deferred startup, and managed-error logging. Separate tests use the game's actual Mono runtime and native Noesis library without starting or attaching to Sea Power. Before native Noesis initialization, they verify that only the startup observer is installed. They then verify that an initialization failure is logged without installing UI hooks, and that nested initialization waits for the outer return and a later update before installing the real hooks. They also exercise the packaged dialog, native language-file loading and English fallback, an additional partial translation, native keyboard and mouse routing, language changes, lifecycle cleanup, actual Harmony hooks and the installed campaign's menu filter. Application exit is replaced by a counter in the dialog fixture. A local ignored copy of the game assembly bypasses global game-data loading and the pause-view Unity scene guard, supplies the streaming-assets path to the INI initializer, and skips modifier-registry scanning in the fixture without published file layers. All six product hook methods and the native language-loading methods retain their original IL. The installed game assembly is read-only and is never changed.
 

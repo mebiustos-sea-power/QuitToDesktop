@@ -31,10 +31,7 @@ internal static class NativeTests
         var fixture = new Harmony("mebiustos.quittodesktop.tests.fixture");
         try
         {
-#pragma warning disable SYSLIB0050
-            language = (LanguageResourceHandler)FormatterServices.GetUninitializedObject(typeof(LanguageResourceHandler));
-#pragma warning restore SYSLIB0050
-            Field("keyDictionary").SetValue(language, new ConcurrentDictionary<(string, string), string>());
+            language = CreateLanguageHandler();
             ChangeLanguage("en", false);
             fixture.Patch(AccessTools.PropertyGetter(typeof(Singleton<LanguageResourceHandler>), "Instance"),
                 prefix: new HarmonyMethod(typeof(NativeTests), nameof(FakeLanguage)));
@@ -45,6 +42,15 @@ internal static class NativeTests
             PatchTests();
         }
         finally { fixture.UnpatchSelf(); GUI.Shutdown(); }
+    }
+
+    private static LanguageResourceHandler CreateLanguageHandler()
+    {
+#pragma warning disable SYSLIB0050
+        var handler = (LanguageResourceHandler)FormatterServices.GetUninitializedObject(typeof(LanguageResourceHandler));
+#pragma warning restore SYSLIB0050
+        Field("keyDictionary").SetValue(handler, new ConcurrentDictionary<(string, string), string>());
+        return handler;
     }
 
     private static FieldInfo Field(string name) => typeof(LanguageResourceHandler).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!;
@@ -82,6 +88,57 @@ internal static class NativeTests
                 Require(button.ButtonContent == Localization.For(code).Title && !button.ButtonContent.Contains("MISSING TEXT"), "The native button label did not follow the replacement language dictionary.");
             }
         });
+        Check("recreating the language handler restores a translated quit entry and releases the old language subscription", () =>
+        {
+            var originalLanguage = language;
+            int opens = 0, refreshes = 0;
+            QuitText? refreshedText = null;
+            var entry = new MenuEntry(() => opens++, text => { refreshes++; refreshedText = text; });
+            var previousButton = entry.GetOrCreate(language);
+            var native = new PauseMenuButton("PauseMenu", "Exit", new DelegateCommand(_ => { }), true, true);
+            var foreign = new PauseMenuButton("MebiusTosQuitToDesktop", "Quit", previousButton.ButtonCommand, true, true);
+            var menu = entry.Extend(new List<PauseMenuButton> { native, foreign }, language);
+            try
+            {
+                foreach (string code in new[] { "ja", "de", "en" })
+                {
+                    var retiredLanguage = language;
+                    language = CreateLanguageHandler();
+                    ChangeLanguage(code, false);
+                    var button = entry.GetOrCreate(language);
+                    Require(!ReferenceEquals(previousButton, button) && button.ButtonContent == Localization.For(code).Title,
+                        "A new language handler did not receive its own translated quit button.");
+
+                    var previousMenu = menu;
+                    menu = entry.Extend(previousMenu, language);
+                    menu = entry.Extend(menu, language);
+                    Require(menu.Count == 3 && ReferenceEquals(menu[0], native) && ReferenceEquals(menu[1], foreign) &&
+                        ReferenceEquals(menu[2], button) && ReferenceEquals(entry.GetOrCreate(language), button) &&
+                        !menu.Contains(previousButton) && previousMenu.Count == 3 && ReferenceEquals(previousMenu[2], previousButton),
+                        "A retained menu kept an old Quit, changed another action, or mutated its previous list.");
+                    int previousOpens = opens;
+                    button.ButtonCommand.Execute(null);
+                    Require(opens == previousOpens + 1, "The recreated quit button no longer invokes confirmation.");
+
+                    int previousRefreshes = refreshes;
+                    ((EventHandler?)Field("LanguageChanged").GetValue(retiredLanguage))?.Invoke(retiredLanguage, EventArgs.Empty);
+                    Require(refreshes == previousRefreshes && button.ButtonContent == Localization.For(code).Title,
+                        "A retired language handler still updates the current quit UI.");
+
+                    ChangeLanguage("ja", true);
+                    Require(button.ButtonContent == Localization.For("ja").Title && refreshes == previousRefreshes + 1 &&
+                        ReferenceEquals(refreshedText, Localization.For("ja")),
+                        "The replacement handler did not refresh Japanese menu and confirmation text exactly once.");
+                    ChangeLanguage("de", true);
+                    Require(button.ButtonContent == Localization.For("en").Title && refreshes == previousRefreshes + 2 &&
+                        ReferenceEquals(refreshedText, Localization.For("en")),
+                        "The replacement handler lost English fallback or duplicated its language subscription.");
+                    previousButton = button;
+                }
+            }
+            finally { language = originalLanguage; }
+        });
+
         Check("only the quit entry is compact and right-aligned, while neighboring mod actions and scrolling remain usable", () =>
         {
             bool Same(Color first, Color second) => first.A == second.A && first.R == second.R && first.G == second.G && first.B == second.B;
@@ -180,6 +237,47 @@ internal static class NativeTests
                 scroll.ScrollToBottom(); view.Update(0.5);
                 Require(scroll.VerticalOffset > 0 && Gap(quitButton, followingButton) == ordinaryGap,
                     "The menu stopped scrolling or a following action was displaced.");
+
+                var originalLanguage = language;
+                double reloadTime = 0.6;
+                try
+                {
+                    foreach (string code in new[] { "ja", "de", "en" })
+                    {
+                        language = CreateLanguageHandler();
+                        ChangeLanguage(code, false);
+                        quit = entry.GetOrCreate(language);
+                        rows.ItemsSource = new[] { native, sameLabel, quit, following };
+                        MenuAccent.Apply(menu, quit);
+                        view.SetSize(640, 480); view.Update(reloadTime);
+                        nativeButton = RowButton(0); otherButton = RowButton(1);
+                        quitButton = RowButton(2); followingButton = RowButton(3);
+                        RequireCompact(nativeButton, quitButton);
+                        Require(Same(((SolidColorBrush)quitButton.Background).Color, background) &&
+                            Gap(otherButton, quitButton) == quitGap && Gap(quitButton, followingButton) == ordinaryGap &&
+                            Same(((SolidColorBrush)otherButton.Background).Color, ((SolidColorBrush)nativeButton.Background).Color),
+                            "A reused view lost the current Quit appearance or changed another row.");
+
+                        var currentStyle = (Style)menu.Resources[nameof(Button)];
+                        Require(currentStyle.BasedOn.Equals(original) && rows.ItemContainerStyle.BasedOn == null,
+                            "Rebinding Quit stacked its styles on previous applications.");
+                        MenuAccent.Apply(menu, quit);
+                        Require(ReferenceEquals(menu.Resources[nameof(Button)], currentStyle),
+                            "Reapplying the same Quit changed its already prepared style.");
+                        view.SetSize(360, 180); view.Update(reloadTime + 0.1);
+                        scroll.ScrollToBottom(); view.Update(reloadTime + 0.2);
+                        RequireCompact(nativeButton, quitButton);
+                        Require(scroll.ScrollableHeight > 0 && scroll.VerticalOffset > 0,
+                            "The reused pause menu stopped scrolling.");
+
+                        ChangeLanguage("ja", true); view.Update(reloadTime + 0.3);
+                        Require(quitButton.Content?.ToString() == Localization.For("ja").Title &&
+                            Same(((SolidColorBrush)quitButton.Background).Color, background),
+                            "The reused styled entry stopped following language changes.");
+                        reloadTime += 0.4;
+                    }
+                }
+                finally { language = originalLanguage; }
             }
             finally { view.Dispose(); }
         });
@@ -301,6 +399,30 @@ internal static class NativeTests
                 Require(model.PauseMenuButtons.Count == 1 && otherCalls > 0, "The actual property hook did not populate the menu alongside another patch.");
                 var first = model.PauseMenuButtons[0]; model.PauseMenuButtons = model.PauseMenuButtons;
                 Require(model.PauseMenuButtons.Count == 1 && ReferenceEquals(first, model.PauseMenuButtons[0]), "The actual hook duplicated its menu item.");
+                var originalLanguage = language;
+                try
+                {
+                    language = CreateLanguageHandler();
+                    ChangeLanguage("ja", false);
+                    var current = Runtime.Entry.GetOrCreate(language);
+                    var previousMenu = model.PauseMenuButtons;
+                    model.PauseMenuButtons = previousMenu;
+                    Require(model.PauseMenuButtons.Count == 1 && ReferenceEquals(model.PauseMenuButtons[0], current) &&
+                        previousMenu.Count == 1 && ReferenceEquals(previousMenu[0], first),
+                        "The actual hook duplicated Quit in a retained menu or changed the previous list.");
+                    var rebuilt = new PauseMenuViewModel();
+                    var native = new PauseMenuButton("PauseMenu", "Exit", new DelegateCommand(_ => { }), true, true);
+                    rebuilt.PauseMenuButtons = new List<PauseMenuButton> { native };
+                    Require(rebuilt.PauseMenuButtons.Count == 2 && ReferenceEquals(rebuilt.PauseMenuButtons[0], native) &&
+                        !ReferenceEquals(rebuilt.PauseMenuButtons[1], first) &&
+                        rebuilt.PauseMenuButtons[1].ButtonContent == Localization.For("ja").Title,
+                        "The actual menu hook did not recover after the game recreated its language handler.");
+                    ChangeLanguage("de", true);
+                    Require(rebuilt.PauseMenuButtons[1].ButtonContent == Localization.For("en").Title,
+                        "The injected button stopped following language changes after a scene reload.");
+                }
+                finally { language = originalLanguage; }
+
                 foreach (var target in new[] { setter, AccessTools.Method(typeof(MenuSystemView), "MenuSystem_PreviewKeyDown"),
                     AccessTools.Method(typeof(CancelAction), "cancel"), AccessTools.Method(typeof(CampaignMain), "PauseMenu_performed"),
                     AccessTools.Method(typeof(CampaignMain).Assembly.GetType("SeaPower.LinearCampaign", true), "PauseMenu_performed"),

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using SeaPower;
 using SeapowerUI.ViewModels;
 
@@ -9,6 +10,7 @@ internal sealed class MenuEntry
 {
     private const string Section = "MebiusTosQuitToDesktop";
     private const string Key = "Quit";
+    private readonly ConditionalWeakTable<PauseMenuButton, MenuEntry> ownedEntries = new();
     private readonly Action show;
     private readonly Action<QuitText> refreshDialog;
     private LanguageResourceHandler? owner;
@@ -17,20 +19,31 @@ internal sealed class MenuEntry
     internal MenuEntry(Action show, Action<QuitText> refreshDialog)
     { this.show = show; this.refreshDialog = refreshDialog; }
 
-    internal List<PauseMenuButton> Extend(List<PauseMenuButton> original, LanguageResourceHandler language) =>
-        MenuList.AppendOnce(original, GetOrCreate(language));
+    internal List<PauseMenuButton> Extend(List<PauseMenuButton> original, LanguageResourceHandler language)
+    {
+        var current = GetOrCreate(language);
+        var result = MenuList.AppendOnce(original, current);
+        result.RemoveAll(item => !ReferenceEquals(item, current) && ownedEntries.TryGetValue(item, out _));
+        return result;
+    }
 
     internal PauseMenuButton GetOrCreate(LanguageResourceHandler language)
     {
-        if (ReferenceEquals(owner, null))
+        if (!ReferenceEquals(owner, language))
         {
+            if (!ReferenceEquals(owner, null)) owner.LanguageChanged -= LanguageChanged;
             owner = language;
+            entry = null;
             // Publish before the native button's LanguageChanged subscriber reads the new dictionary.
             language.LanguageChanged += LanguageChanged;
         }
-        if (!ReferenceEquals(owner, language)) throw new InvalidOperationException("The language handler was replaced.");
         Publish();
-        entry ??= new PauseMenuButton(Section, Key, new DelegateCommand(_ => Callbacks.Boundary.Run("Could not open the quit confirmation", show)), true, true);
+        if (entry == null)
+        {
+            var created = new PauseMenuButton(Section, Key, new DelegateCommand(_ => Callbacks.Boundary.Run("Could not open the quit confirmation", show)), true, true);
+            ownedEntries.Add(created, this);
+            entry = created;
+        }
         return entry;
     }
 

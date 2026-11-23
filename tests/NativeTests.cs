@@ -19,7 +19,21 @@ using static Program;
 internal static class NativeTests
 {
     private static LanguageResourceHandler language = null!;
+    private static FileManager files = null!;
     private static int otherCalls;
+    private static bool FakeFiles(ref FileManager __result) { __result = files; return false; }
+    private static bool FindLanguageFiles(string __0, string __1, ref List<string> __result)
+    {
+        string root = Path.GetDirectoryName(typeof(NativeTests).Assembly.Location)!;
+        var result = new List<string>();
+        foreach (string folder in new[] { "Translations", "Package" })
+        {
+            string path = Path.Combine(root, folder, __0);
+            if (Directory.Exists(path)) result.AddRange(Directory.GetFiles(path, __1));
+        }
+        __result = result;
+        return false;
+    }
     private static void OtherPrefix() => otherCalls++;
     private static bool FakeLanguage(ref LanguageResourceHandler __result) { __result = language; return false; }
 
@@ -31,12 +45,22 @@ internal static class NativeTests
         var fixture = new Harmony("mebiustos.quittodesktop.tests.fixture");
         try
         {
+#pragma warning disable SYSLIB0050
+            files = (FileManager)FormatterServices.GetUninitializedObject(typeof(FileManager));
+#pragma warning restore SYSLIB0050
+            fixture.Patch(AccessTools.PropertyGetter(typeof(Singleton<FileManager>), "Instance"),
+                prefix: new HarmonyMethod(typeof(NativeTests), nameof(FakeFiles)));
+            fixture.Patch(AccessTools.Method(typeof(FileManager), "GetAllFiles"),
+                prefix: new HarmonyMethod(typeof(NativeTests), nameof(FindLanguageFiles)));
+            // The standalone fixture has no published file layers or INI modifier registry.
+            AccessTools.Field(typeof(IniHandler), "_modifierScanComplete").SetValue(null, true);
             language = CreateLanguageHandler();
             ChangeLanguage("en", false);
             fixture.Patch(AccessTools.PropertyGetter(typeof(Singleton<LanguageResourceHandler>), "Instance"),
                 prefix: new HarmonyMethod(typeof(NativeTests), nameof(FakeLanguage)));
             Console.WriteLine("Game hook assembly: " + typeof(PauseMenuView).Assembly.Location);
             Require(typeof(PauseMenuView).Assembly.Location.Contains("game-fixture"), "The standalone process did not load its isolated Unity-boundary fixture.");
+            LanguageTests();
             MenuTests(directory);
             DialogTests();
             PatchTests();
@@ -50,17 +74,52 @@ internal static class NativeTests
         var handler = (LanguageResourceHandler)FormatterServices.GetUninitializedObject(typeof(LanguageResourceHandler));
 #pragma warning restore SYSLIB0050
         Field("keyDictionary").SetValue(handler, new ConcurrentDictionary<(string, string), string>());
+        Field("skipFiles").SetValue(handler, Array.Empty<string>());
         return handler;
     }
 
     private static FieldInfo Field(string name) => typeof(LanguageResourceHandler).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!;
     private static void ChangeLanguage(string code, bool notify)
     {
-        Field("_language").SetValue(language, code);
-        var dict = new DictionaryWithFallbacks<string, string>();
-        dict.Add("pausemenuexit", "Native mission exit"); dict.Add("pausemenusaveas", "Native save");
-        Field("_languageDictionary").SetValue(language, dict);
-        if (notify) ((EventHandler?)Field("LanguageChanged").GetValue(language))?.Invoke(language, EventArgs.Empty);
+        if (notify) language.Language = code;
+        else InitializeLanguage(language, code);
+    }
+
+    private static void InitializeLanguage(LanguageResourceHandler handler, string code)
+    {
+        Field("_language").SetValue(handler, code);
+        AccessTools.Method(typeof(LanguageResourceHandler), "initLanguages").Invoke(handler, null);
+    }
+
+    private static QuitText TextFor(string code)
+    {
+        var handler = CreateLanguageHandler();
+        InitializeLanguage(handler, code);
+        return Localization.For(handler);
+    }
+
+    private static bool SameText(QuitText? first, QuitText second) => first != null &&
+        first.Title == second.Title && first.Category == second.Category && first.Message == second.Message &&
+        first.Warning == second.Warning && first.Cancel == second.Cancel;
+
+    private static void LanguageTests()
+    {
+        Check("native language loading reads packaged translations, extra languages and per-key English fallback", () =>
+        {
+            var english = TextFor("en");
+            var japanese = TextFor("ja");
+            Require(english.Title == "Quit Sea Power" && japanese.Title == "Sea Power を終了する" &&
+                english.Category != japanese.Category && english.Message != japanese.Message &&
+                english.Warning != japanese.Warning && english.Cancel != japanese.Cancel,
+                "The native loader did not read both packaged languages.");
+            foreach (string code in new[] { "de", "ko", "ru", "cn" })
+                Require(SameText(english, TextFor(code)), "An untranslated language lost English fallback: " + code);
+            var additional = TextFor("fr");
+            Require(additional.Title == "Custom test quit" && additional.Message == "First test line\nSecond test line" &&
+                additional.Category == english.Category && additional.Warning == english.Warning && additional.Cancel == english.Cancel,
+                "An external partial translation was ignored, lost escaped newlines, or failed per-key fallback.");
+            Throws<InvalidOperationException>(() => Localization.For(CreateLanguageHandler()));
+        });
     }
 
     private static void MenuTests(string directory)
@@ -85,7 +144,7 @@ internal static class NativeTests
             foreach (string code in new[] { "ja", "de", "fr", "en" })
             {
                 ChangeLanguage(code, true);
-                Require(button.ButtonContent == Localization.For(code).Title && !button.ButtonContent.Contains("MISSING TEXT"), "The native button label did not follow the replacement language dictionary.");
+                Require(button.ButtonContent == TextFor(code).Title && !button.ButtonContent.Contains("MISSING TEXT"), "The native button label did not follow the replacement language dictionary.");
             }
         });
         Check("recreating the language handler restores a translated quit entry and releases the old language subscription", () =>
@@ -106,7 +165,7 @@ internal static class NativeTests
                     language = CreateLanguageHandler();
                     ChangeLanguage(code, false);
                     var button = entry.GetOrCreate(language);
-                    Require(!ReferenceEquals(previousButton, button) && button.ButtonContent == Localization.For(code).Title,
+                    Require(!ReferenceEquals(previousButton, button) && button.ButtonContent == TextFor(code).Title,
                         "A new language handler did not receive its own translated quit button.");
 
                     var previousMenu = menu;
@@ -122,16 +181,16 @@ internal static class NativeTests
 
                     int previousRefreshes = refreshes;
                     ((EventHandler?)Field("LanguageChanged").GetValue(retiredLanguage))?.Invoke(retiredLanguage, EventArgs.Empty);
-                    Require(refreshes == previousRefreshes && button.ButtonContent == Localization.For(code).Title,
+                    Require(refreshes == previousRefreshes && button.ButtonContent == TextFor(code).Title,
                         "A retired language handler still updates the current quit UI.");
 
                     ChangeLanguage("ja", true);
-                    Require(button.ButtonContent == Localization.For("ja").Title && refreshes == previousRefreshes + 1 &&
-                        ReferenceEquals(refreshedText, Localization.For("ja")),
+                    Require(button.ButtonContent == TextFor("ja").Title && refreshes == previousRefreshes + 1 &&
+                        SameText(refreshedText, TextFor("ja")),
                         "The replacement handler did not refresh Japanese menu and confirmation text exactly once.");
                     ChangeLanguage("de", true);
-                    Require(button.ButtonContent == Localization.For("en").Title && refreshes == previousRefreshes + 2 &&
-                        ReferenceEquals(refreshedText, Localization.For("en")),
+                    Require(button.ButtonContent == TextFor("en").Title && refreshes == previousRefreshes + 2 &&
+                        SameText(refreshedText, TextFor("en")),
                         "The replacement handler lost English fallback or duplicated its language subscription.");
                     previousButton = button;
                 }
@@ -271,7 +330,7 @@ internal static class NativeTests
                             "The reused pause menu stopped scrolling.");
 
                         ChangeLanguage("ja", true); view.Update(reloadTime + 0.3);
-                        Require(quitButton.Content?.ToString() == Localization.For("ja").Title &&
+                        Require(quitButton.Content?.ToString() == TextFor("ja").Title &&
                             Same(((SolidColorBrush)quitButton.Background).Color, background),
                             "The reused styled entry stopped following language changes.");
                         reloadTime += 0.4;
@@ -370,12 +429,18 @@ internal static class NativeTests
         });
         Check("dialog labels switch together between Japanese and English", () =>
         {
-            using var ui = new UiFixture(); ui.Open();
-            foreach (string code in new[] { "ja", "ko", "en" })
+            using var ui = new UiFixture();
+            var entry = new MenuEntry(() => { }, ui.Coordinator.RefreshText);
+            entry.GetOrCreate(language);
+            ui.Open();
+            foreach (string code in new[] { "ja", "fr", "ko", "en" })
             {
-                var text = Localization.For(code); ui.Coordinator.RefreshText(text); ui.Update();
+                ChangeLanguage(code, true);
+                var text = TextFor(code); ui.Update();
                 var root = ui.Coordinator.Dialog!.Root;
                 Require(((TextBlock)root.FindName("DialogTitle")).Text == text.Title &&
+                    ((TextBlock)root.FindName("DialogCategory")).Text == text.Category &&
+                    ((TextBlock)root.FindName("DialogMessage")).Text == text.Message &&
                     ((TextBlock)root.FindName("DialogWarning")).Text == text.Warning &&
                     (string)ui.Button("ConfirmQuit").Content == text.Title && (string)ui.Button("CancelQuit").Content == text.Cancel,
                     "The title, warning or action buttons retained the previous language.");
@@ -415,10 +480,10 @@ internal static class NativeTests
                     rebuilt.PauseMenuButtons = new List<PauseMenuButton> { native };
                     Require(rebuilt.PauseMenuButtons.Count == 2 && ReferenceEquals(rebuilt.PauseMenuButtons[0], native) &&
                         !ReferenceEquals(rebuilt.PauseMenuButtons[1], first) &&
-                        rebuilt.PauseMenuButtons[1].ButtonContent == Localization.For("ja").Title,
+                        rebuilt.PauseMenuButtons[1].ButtonContent == TextFor("ja").Title,
                         "The actual menu hook did not recover after the game recreated its language handler.");
                     ChangeLanguage("de", true);
-                    Require(rebuilt.PauseMenuButtons[1].ButtonContent == Localization.For("en").Title,
+                    Require(rebuilt.PauseMenuButtons[1].ButtonContent == TextFor("en").Title,
                         "The injected button stopped following language changes after a scene reload.");
                 }
                 finally { language = originalLanguage; }
@@ -457,7 +522,7 @@ internal static class NativeTests
                 Template = (ControlTemplate)GUI.ParseXaml("<ControlTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' TargetType='Button'><Border Background='#345678'/></ControlTemplate>") };
             background.Click += (_, _) => BackgroundClicks++;
             Overlay.Children.Add(background);
-            Coordinator = new QuitCoordinator(() => Current, () => Localization.For("en"), () => Frame, () => Quits++);
+            Coordinator = new QuitCoordinator(() => Current, () => Localization.For(language), () => Frame, () => Quits++);
             Menu.PreviewKeyDown += (_, e) => { if (Coordinator.IsOpen) { e.Handled = true; Coordinator.HandleKey(e.Key, e.IsRepeat); } };
             view = GUI.CreateView(Menu); view.SetSize(1280, 720); Update();
         }

@@ -13,7 +13,7 @@ internal static class Runtime
 {
     internal static readonly QuitCoordinator Confirmation = new(
         () => MenuSystemViewModel.Instance.CurrentWindow as PauseMenuView,
-        () => Localization.For(LanguageResourceHandler.Instance.Language),
+        () => Localization.For(LanguageResourceHandler.Instance),
         () => UnityEngine.Time.frameCount, UnityEngine.Application.Quit);
     internal static readonly MenuEntry Entry = new(Confirmation.Show, Confirmation.RefreshText);
 }

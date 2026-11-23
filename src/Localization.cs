@@ -1,4 +1,5 @@
 using System;
+using SeaPower;
 
 namespace QuitToDesktop;
 
@@ -16,15 +17,17 @@ internal sealed class QuitText
 
 internal static class Localization
 {
-    private static readonly QuitText english = new("Quit Sea Power", "APPLICATION EXIT",
-        "Quit Sea Power and return to the desktop?",
-        "Unsaved progress will be lost. This does not save or finalize the mission.", "Cancel");
-    private static readonly QuitText japanese = new("Sea Power を終了する", "アプリケーションの終了",
-        "Sea Power を終了してデスクトップに戻りますか？",
-        "保存していない進行状況は失われます。この操作では保存やミッション結果の確定を行いません。", "キャンセル");
+    internal const string Section = "MebiusTosQuitToDesktop";
 
-    internal static QuitText For(string? language) => language != null &&
-        (language.Equals("ja", StringComparison.OrdinalIgnoreCase) ||
-         language.StartsWith("ja-", StringComparison.OrdinalIgnoreCase) ||
-         language.StartsWith("ja_", StringComparison.OrdinalIgnoreCase)) ? japanese : english;
+    internal static QuitText For(LanguageResourceHandler language)
+    {
+        if (language.LanguageDictionary == null)
+            throw new InvalidOperationException("The language dictionary is uninitialized.");
+        return new QuitText(
+            language.getText(Section, "Quit"),
+            language.getText(Section, "Category"),
+            language.getText(Section, "Message"),
+            language.getText(Section, "Warning"),
+            language.getText(Section, "Cancel"));
+    }
 }

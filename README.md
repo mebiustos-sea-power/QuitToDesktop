@@ -12,7 +12,7 @@ Mod-owned Anchor Chain, initialization, Unity update, game-hook, button, languag
 
 ## Language
 
-The menu entry and every confirmation label follow the game's language setting. English and Japanese are included; every other language uses English. Language changes update the existing menu item and an open confirmation.
+The menu entry and every confirmation label follow the game's language setting. English and Japanese translations are provided in `language_en/quittodesktop.ini` and `language_ja/quittodesktop.ini`. Sea Power loads these files through its standard language system and uses English for untranslated entries. Language changes update the existing menu item and an open confirmation. Translations can be edited or extended with a `language_<code>/quittodesktop.ini` file using the same section and keys, without rebuilding the DLL.
 
 ## Requirements and installation
 
@@ -31,9 +31,9 @@ Use a Windows .NET SDK with the .NET 10 and .NET Standard 2.1 targeting packs. C
 & .\build.ps1 -Test
 ```
 
-The package is written to `dist/QuitToDesktop` and `dist/QuitToDesktop-v0.1.3.zip`. The three package files are the plugin DLL, this README, and `_info.ini`; the bilingual UI and XAML are embedded in the DLL.
+The package is written to `dist/QuitToDesktop` and `dist/QuitToDesktop-v0.1.3.zip`. The package contains the plugin DLL, this README, `_info.ini`, and the two language folders. The dialog XAML is embedded in the DLL; translated text is stored in the INI files. To build into a separate directory, pass `-OutputDirectory <path>`.
 
-Core tests cover mandatory confirmation, cancellation, stale/duplicate approval, menu replacement and ordering, mod-manager activation, language selection, deferred startup, and managed-error logging. Separate tests use the game's actual Mono runtime and native Noesis library without starting or attaching to Sea Power. Before native Noesis initialization, they verify that only the startup observer is installed. They then verify that an initialization failure is logged without installing UI hooks, and that nested initialization waits for the outer return and a later update before installing the real hooks. They also exercise the packaged dialog, native keyboard and mouse routing, language changes, lifecycle cleanup, actual Harmony hooks and the installed campaign's menu filter. Application exit is replaced by a counter in the dialog fixture. A local ignored copy of the game assembly bypasses global game-data loading and the pause-view Unity scene guard; all six product hook methods retain their original IL. The installed game assembly is read-only and is never changed.
+Core tests cover mandatory confirmation, cancellation, stale/duplicate approval, menu replacement and ordering, mod-manager activation, deferred startup, and managed-error logging. Separate tests use the game's actual Mono runtime and native Noesis library without starting or attaching to Sea Power. Before native Noesis initialization, they verify that only the startup observer is installed. They then verify that an initialization failure is logged without installing UI hooks, and that nested initialization waits for the outer return and a later update before installing the real hooks. They also exercise the packaged dialog, native language-file loading and English fallback, an additional partial translation, native keyboard and mouse routing, language changes, lifecycle cleanup, actual Harmony hooks and the installed campaign's menu filter. Application exit is replaced by a counter in the dialog fixture. A local ignored copy of the game assembly bypasses global game-data loading and the pause-view Unity scene guard, supplies the streaming-assets path to the INI initializer, and skips modifier-registry scanning in the fixture without published file layers. All six product hook methods and the native language-loading methods retain their original IL. The installed game assembly is read-only and is never changed.
 
 These isolated checks do not prove live game input order, rendering under every UI scale, or the game's shutdown behavior with a loaded mission. Those require in-game verification after installation. Live rendering and shutdown with a loaded mission remain unverified.
 
@@ -41,10 +41,11 @@ These isolated checks do not prove live game input order, rendering under every 
 
 - `Core/`: confirmation tokens, pause-input suppression, and menu composition.
 - `UI/`: the independent modal dialog and its lifecycle.
-- `Localization.cs`: English/Japanese strings and selection policy.
+- `Localization.cs`: reads UI text from Sea Power's current language resources.
+- `package/language_en/`, `package/language_ja/`: standard language INIs.
 - `MenuEntry.cs`: the native button and language-resource integration.
 - `Startup/`: initialization completion and deferred installation.
 - `GamePatches.cs`: game-specific integration points.
 - `FailureBoundary.cs`: shared ordinary-exception handling for mod callbacks.
 
-No game assets, assemblies, save files or settings are rewritten. Local dependency paths, build outputs and `docs/agent-memory.md` are excluded from version control; only the three package files are distributed.
+No game assets, assemblies, save files or settings are rewritten. Local dependency paths, build outputs and `docs/agent-memory.md` are excluded from version control; only the plugin DLL, README, `_info.ini` and language INIs are distributed.

@@ -72,13 +72,5 @@ internal static class CoreTests
             Throws<ArgumentNullException>(() => MenuList.AppendOnce<object>(null!, new object()));
             Throws<InvalidOperationException>(() => MenuList.AppendOnce(new List<object> { null! }, new object()));
         });
-        Check("Japanese game locales select Japanese and every other locale selects English", () =>
-        {
-            var ja = Localization.For("ja"); var en = Localization.For("en");
-            foreach (string language in new[] { "ja", "JA", "ja-JP", "ja_JP" }) Require(ReferenceEquals(ja, Localization.For(language)), "Japanese locale was not selected: " + language);
-            foreach (string? language in new[] { "en", "de", "fr", "cn", "ru", "es", "ko", "javanese", "", null })
-                Require(ReferenceEquals(en, Localization.For(language)), "An unsupported locale did not select English: " + language);
-            Require(!ReferenceEquals(ja, en), "English and Japanese were conflated.");
-        });
     }
 }

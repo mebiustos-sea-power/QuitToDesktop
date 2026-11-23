@@ -1,7 +1,8 @@
 ﻿param(
     [string]$GameDirectory = '',
     [string]$AnchorChainDirectory = '',
-    [switch]$Test
+    [switch]$Test,
+    [string]$OutputDirectory = ''
 )
 $ErrorActionPreference = 'Stop'
 Write-Output 'Building Quit to Desktop.'
@@ -51,21 +52,25 @@ if ($Test) {
     Invoke-TaskProcess (Join-Path $PSHOME 'powershell.exe') @('-NoProfile', '-NonInteractive', '-Command',
         ("& '" + (Join-Path $PSScriptRoot 'tools\test-mono.ps1').Replace("'", "''") + "' -GameDirectory '" + $GameDirectory.Replace("'", "''") + "' -AnchorChainDirectory '" + $AnchorChainDirectory.Replace("'", "''") + "'"))
 }
-$taskPackage = Join-Path $PSScriptRoot 'dist\QuitToDesktop'
+if (-not $OutputDirectory) { $OutputDirectory = Join-Path $PSScriptRoot 'dist' }
+$OutputDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory)
+$taskPackage = Join-Path $OutputDirectory 'QuitToDesktop'
 New-Item -ItemType Directory -Force $taskPackage | Out-Null
 Copy-Item (Join-Path $PSScriptRoot 'src\bin\Release\netstandard2.1\QuitToDesktop.dll') $taskPackage -Force
-Get-ChildItem (Join-Path $PSScriptRoot 'package') -File | ForEach-Object { Copy-Item $_.FullName $taskPackage -Force }
+Get-ChildItem (Join-Path $PSScriptRoot 'package') | ForEach-Object { Copy-Item $_.FullName $taskPackage -Recurse -Force }
 Copy-Item (Join-Path $PSScriptRoot 'README.md') $taskPackage -Force
 Write-Output "Package: $taskPackage"
 [xml]$taskProject = Get-Content (Join-Path $PSScriptRoot 'src\QuitToDesktop.csproj')
 $taskVersion = [string]$taskProject.Project.PropertyGroup.Version
-$taskZip = Join-Path $PSScriptRoot ("dist\QuitToDesktop-v" + $taskVersion + '.zip')
+$taskZip = Join-Path $OutputDirectory ("QuitToDesktop-v" + $taskVersion + '.zip')
 Add-Type -AssemblyName System.IO.Compression
 $taskStream = [IO.File]::Open($taskZip, [IO.FileMode]::Create, [IO.FileAccess]::ReadWrite)
 $taskArchive = [IO.Compression.ZipArchive]::new($taskStream, [IO.Compression.ZipArchiveMode]::Create)
 try {
-    foreach ($taskFile in (Get-ChildItem $taskPackage -File | Sort-Object Name)) {
-        $taskEntry = $taskArchive.CreateEntry(('QuitToDesktop/' + $taskFile.Name), [IO.Compression.CompressionLevel]::Optimal)
+    $taskPackageRoot = (Get-Item -LiteralPath $taskPackage).FullName.TrimEnd('\') + '\'
+    foreach ($taskFile in (Get-ChildItem -LiteralPath $taskPackage -File -Recurse | Sort-Object FullName)) {
+        $taskRelativePath = $taskFile.FullName.Substring($taskPackageRoot.Length).Replace('\', '/')
+        $taskEntry = $taskArchive.CreateEntry(('QuitToDesktop/' + $taskRelativePath), [IO.Compression.CompressionLevel]::Optimal)
         $taskInput = [IO.File]::OpenRead($taskFile.FullName)
         $taskOutput = $taskEntry.Open()
         try { $taskInput.CopyTo($taskOutput) }

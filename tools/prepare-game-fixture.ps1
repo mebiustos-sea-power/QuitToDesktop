@@ -19,7 +19,12 @@ try {
         @('SeaPower.CancelAction', 'cancel'),
         @('SeaPower.CampaignMain', 'PauseMenu_performed'),
         @('SeaPower.LinearCampaign', 'PauseMenu_performed'),
-        @('SeapowerUI.ViewModels.MenuSystemViewModel', 'set_CurrentWindow')
+        @('SeapowerUI.ViewModels.MenuSystemViewModel', 'set_CurrentWindow'),
+        @('SeaPower.LanguageResourceHandler', 'initLanguages'),
+        @('SeaPower.LanguageResourceHandler', '<initLanguages>g__GetLanguageDict|21_0'),
+        @('SeaPower.LanguageResourceHandler', 'changeLanguage'),
+        @('SeaPower.LanguageResourceHandler', 'getText'),
+        @('SeaPower.LocalizationLoader', 'LoadFileAsData')
     )
     $taskBefore = @{}
     foreach ($taskPair in $taskMethods) {
@@ -39,6 +44,13 @@ try {
     if ($taskGuards.Count -ne 1) { throw 'Unsupported pause-view scene guard.' }
     $taskGuards[0].OpCode = [Mono.Cecil.Cil.OpCodes]::Ldc_I4_0
     $taskGuards[0].Operand = $null
+    $taskIniInitializer = @($taskAssembly.MainModule.GetType('SeaPower.IniHandler').Methods | Where-Object Name -eq '.cctor')[0]
+    $taskAssetPaths = @($taskIniInitializer.Body.Instructions | Where-Object { $_.Operand -is [Mono.Cecil.MethodReference] -and $_.Operand.FullName -eq 'System.String UnityEngine.Application::get_streamingAssetsPath()' })
+    if ($taskAssetPaths.Count -ne 2) { throw 'Unsupported INI streaming-assets boundary.' }
+    foreach ($taskAssetPath in $taskAssetPaths) {
+        $taskAssetPath.OpCode = [Mono.Cecil.Cil.OpCodes]::Ldstr
+        $taskAssetPath.Operand = Join-Path $GameDirectory 'Sea Power_Data\StreamingAssets'
+    }
     foreach ($taskPair in $taskMethods) {
         $taskMethod = @($taskAssembly.MainModule.GetType($taskPair[0]).Methods | Where-Object Name -eq $taskPair[1])[0]
         if ($taskBefore[$taskMethod.FullName] -cne (($taskMethod.Body.Instructions | ForEach-Object ToString) -join "`n")) { throw 'A product hook target was changed in the test fixture.' }
@@ -49,7 +61,7 @@ try {
         originalSha256 = (Get-FileHash -Algorithm SHA256 $taskOriginal).Hash.ToLowerInvariant()
         fixture = $taskCopy
         fixtureSha256 = (Get-FileHash -Algorithm SHA256 $taskCopy).Hash.ToLowerInvariant()
-        substitutions = @('SeaPower.Globals::.cctor: skip global game-data loading', 'PauseMenuView::.ctor: Application.isPlaying scene guard returns false')
+        substitutions = @('SeaPower.Globals::.cctor: skip global game-data loading', 'PauseMenuView::.ctor: Application.isPlaying scene guard returns false', 'IniHandler::.cctor: streamingAssetsPath reads use the supplied game directory')
         unchangedHookMethods = @($taskBefore.Keys | Sort-Object)
     } | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 (Join-Path $taskFixture 'fixture.json')
 } finally { $taskAssembly.Dispose(); $taskResolver.Dispose() }

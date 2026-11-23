@@ -8,8 +8,6 @@ namespace QuitToDesktop;
 
 internal sealed class MenuEntry
 {
-    private const string Section = "MebiusTosQuitToDesktop";
-    private const string Key = "Quit";
     private readonly ConditionalWeakTable<PauseMenuButton, MenuEntry> ownedEntries = new();
     private readonly Action show;
     private readonly Action<QuitText> refreshDialog;
@@ -34,29 +32,18 @@ internal sealed class MenuEntry
             if (!ReferenceEquals(owner, null)) owner.LanguageChanged -= LanguageChanged;
             owner = language;
             entry = null;
-            // Publish before the native button's LanguageChanged subscriber reads the new dictionary.
             language.LanguageChanged += LanguageChanged;
         }
-        Publish();
         if (entry == null)
         {
-            var created = new PauseMenuButton(Section, Key, new DelegateCommand(_ => Callbacks.Boundary.Run("Could not open the quit confirmation", show)), true, true);
+            var created = new PauseMenuButton(Localization.Section, "Quit", new DelegateCommand(_ => Callbacks.Boundary.Run("Could not open the quit confirmation", show)), true, true);
             ownedEntries.Add(created, this);
             entry = created;
         }
         return entry;
     }
 
-    private void Publish()
-    {
-        var language = owner ?? throw new InvalidOperationException("The language handler is unavailable.");
-        var dictionary = language.LanguageDictionary ?? throw new InvalidOperationException("The language dictionary is uninitialized.");
-        dictionary[(Section + Key).ToLowerInvariant()] = Localization.For(language.Language).Title;
-    }
-
-    private void LanguageChanged(object sender, EventArgs args)
-    {
+    private void LanguageChanged(object sender, EventArgs args) =>
         Callbacks.Boundary.Run("Could not refresh the quit confirmation language", () =>
-        { Publish(); refreshDialog(Localization.For(owner!.Language)); });
-    }
+            refreshDialog(Localization.For(owner!)));
 }
